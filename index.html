@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de Planillas Angus</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #f0f4f8;
+            color: #2d3748;
+            min-height: 100vh;
+            padding: 30px 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        header h1 {
+            font-size: 1.8rem;
+            color: #1a365d;
+            margin-bottom: 6px;
+        }
+
+        header p {
+            color: #718096;
+            font-size: 0.95rem;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 28px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin-bottom: 24px;
+        }
+
+        .card h2 {
+            font-size: 1.1rem;
+            color: #2d3748;
+            margin-bottom: 18px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        .upload-zone {
+            border: 2px dashed #cbd5e0;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: #f7fafc;
+            margin-bottom: 12px;
+        }
+
+        .upload-zone:hover, .upload-zone.dragover {
+            border-color: #4299e1;
+            background: #ebf8ff;
+        }
+
+        .upload-zone input[type="file"] {
+            display: none;
+        }
+
+        .upload-zone .icon { font-size: 2rem; margin-bottom: 8px; }
+        .upload-zone .label { color: #4a5568; font-size: 0.95rem; }
+        .upload-zone .sublabel { color: #a0aec0; font-size: 0.82rem; margin-top: 4px; }
+
+        .file-count {
+            font-size: 0.85rem;
+            color: #4299e1;
+            font-weight: 600;
+            margin-top: 8px;
+        }
+
+        .base-zone {
+            border: 2px dashed #c6f6d5;
+            background: #f0fff4;
+        }
+        .base-zone:hover { border-color: #48bb78; background: #e6ffed; }
+
+        .btn {
+            display: inline-block;
+            padding: 12px 28px;
+            border-radius: 8px;
+            border: none;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #3182ce;
+            color: white;
+            width: 100%;
+        }
+        .btn-primary:hover { background: #2b6cb0; }
+        .btn-primary:disabled { background: #a0aec0; cursor: not-allowed; }
+
+        .btn-download {
+            background: #38a169;
+            color: white;
+            font-size: 0.85rem;
+            padding: 7px 16px;
+        }
+        .btn-download:hover { background: #2f855a; }
+
+        .btn-zip {
+            background: #805ad5;
+            color: white;
+            padding: 10px 22px;
+        }
+        .btn-zip:hover { background: #6b46c1; }
+
+        #loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+            color: #4a5568;
+        }
+
+        .spinner {
+            width: 36px; height: 36px;
+            border: 4px solid #e2e8f0;
+            border-top-color: #3182ce;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 12px;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        #resultados { display: none; }
+
+        .resultado-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+        }
+
+        .resultado-item .info { flex: 1; }
+        .resultado-item .nombre {
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: #2d3748;
+            margin-bottom: 3px;
+        }
+        .resultado-item .detalle {
+            font-size: 0.8rem;
+            color: #718096;
+        }
+
+        .error-item {
+            background: #fff5f5;
+            border-color: #fed7d7;
+        }
+        .error-item .nombre { color: #c53030; }
+
+        .badge {
+            font-size: 0.72rem;
+            padding: 2px 8px;
+            border-radius: 20px;
+            font-weight: 600;
+            margin-left: 6px;
+        }
+        .badge-ok { background: #c6f6d5; color: #276749; }
+        .badge-err { background: #fed7d7; color: #c53030; }
+
+        .resumen {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .stat {
+            background: #ebf8ff;
+            border-radius: 8px;
+            padding: 12px 20px;
+            text-align: center;
+            flex: 1;
+            min-width: 100px;
+        }
+        .stat .num { font-size: 1.6rem; font-weight: 700; color: #2b6cb0; }
+        .stat .lbl { font-size: 0.78rem; color: #4a5568; margin-top: 2px; }
+
+        .acciones-zip {
+            text-align: center;
+            margin-top: 16px;
+        }
+
+        .nota {
+            font-size: 0.8rem;
+            color: #a0aec0;
+            margin-top: 8px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <header>
+        <h1>🥩 Generador de Planillas Angus</h1>
+        <p>Procesá archivos PIQUEO y descargá las planillas completadas con cortes AA</p>
+    </header>
+
+    <div class="card">
+        <h2>📂 Archivos PIQUEO</h2>
+        <div class="upload-zone" id="piqueoZone" onclick="document.getElementById('piqueoInput').click()">
+            <div class="icon">📊</div>
+            <div class="label">Hacé click o arrastrá los archivos PIQUEO acá</div>
+            <div class="sublabel">Podés seleccionar varios a la vez (.xlsx)</div>
+            <input type="file" id="piqueoInput" accept=".xlsx" multiple>
+            <div class="file-count" id="piqueoCount"></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>📋 Planilla BASE <span style="font-weight:400;color:#a0aec0;font-size:0.85rem">(opcional si ya está en el servidor)</span></h2>
+        <div class="upload-zone base-zone" id="baseZone" onclick="document.getElementById('baseInput').click()">
+            <div class="icon">📄</div>
+            <div class="label">Subí la Planilla_BASE_.xlsx</div>
+            <div class="sublabel">Se usa si el archivo PIQUEO no tiene hoja PLANILLA</div>
+            <input type="file" id="baseInput" accept=".xlsx">
+            <div class="file-count" id="baseCount"></div>
+        </div>
+    </div>
+
+    <button class="btn btn-primary" id="btnProcesar" onclick="procesar()">
+        ⚙️ Procesar archivos
+    </button>
+
+    <div id="loading">
+        <div class="spinner"></div>
+        <p>Procesando archivos...</p>
+    </div>
+
+    <div id="resultados" class="card" style="margin-top:24px">
+        <h2>✅ Resultados</h2>
+        <div class="resumen" id="resumen"></div>
+        <div id="listaResultados"></div>
+        <div class="acciones-zip" id="accionesZip" style="display:none">
+            <button class="btn btn-zip" onclick="descargarTodo()">
+                📦 Descargar todo como ZIP
+            </button>
+            <p class="nota">Los archivos se eliminan del servidor al cerrar la sesión</p>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    const piqueoInput = document.getElementById('piqueoInput');
+    const baseInput = document.getElementById('baseInput');
+    const piqueoZone = document.getElementById('piqueoZone');
+
+    piqueoInput.addEventListener('change', () => {
+        const n = piqueoInput.files.length;
+        document.getElementById('piqueoCount').textContent = n > 0 ? `${n} archivo${n > 1 ? 's' : ''} seleccionado${n > 1 ? 's' : ''}` : '';
+    });
+
+    baseInput.addEventListener('change', () => {
+        const f = baseInput.files[0];
+        document.getElementById('baseCount').textContent = f ? `✓ ${f.name}` : '';
+    });
+
+    // Drag & drop
+    piqueoZone.addEventListener('dragover', e => { e.preventDefault(); piqueoZone.classList.add('dragover'); });
+    piqueoZone.addEventListener('dragleave', () => piqueoZone.classList.remove('dragover'));
+    piqueoZone.addEventListener('drop', e => {
+        e.preventDefault();
+        piqueoZone.classList.remove('dragover');
+        piqueoInput.files = e.dataTransfer.files;
+        const n = e.dataTransfer.files.length;
+        document.getElementById('piqueoCount').textContent = n > 0 ? `${n} archivo${n > 1 ? 's' : ''} seleccionado${n > 1 ? 's' : ''}` : '';
+    });
+
+    async function procesar() {
+        const files = piqueoInput.files;
+        if (!files.length) {
+            alert('Seleccioná al menos un archivo PIQUEO');
+            return;
+        }
+
+        const formData = new FormData();
+        for (const f of files) formData.append('piqueo_files', f);
+        const base = baseInput.files[0];
+        if (base) formData.append('planilla_base', base);
+
+        document.getElementById('btnProcesar').disabled = true;
+        document.getElementById('loading').style.display = 'block';
+        document.getElementById('resultados').style.display = 'none';
+
+        try {
+            const res = await fetch('/procesar', { method: 'POST', body: formData });
+            const data = await res.json();
+
+            if (data.error) {
+                alert(data.error);
+                return;
+            }
+
+            mostrarResultados(data);
+        } catch (e) {
+            alert('Error al procesar: ' + e.message);
+        } finally {
+            document.getElementById('btnProcesar').disabled = false;
+            document.getElementById('loading').style.display = 'none';
+        }
+    }
+
+    function mostrarResultados(data) {
+        const { resultados, errores } = data;
+        const total = resultados.length + errores.length;
+
+        document.getElementById('resumen').innerHTML = `
+            <div class="stat"><div class="num">${total}</div><div class="lbl">Total</div></div>
+            <div class="stat"><div class="num" style="color:#276749">${resultados.length}</div><div class="lbl">Completados</div></div>
+            <div class="stat"><div class="num" style="color:#c53030">${errores.length}</div><div class="lbl">Errores</div></div>
+        `;
+
+        let html = '';
+        for (const r of resultados) {
+            html += `
+                <div class="resultado-item">
+                    <div class="info">
+                        <div class="nombre">${r.nombre}<span class="badge badge-ok">OK</span></div>
+                        <div class="detalle">${r.cortes} cortes AA · ${r.tropas} tropas · ${r.lotes} lotes${r.base_note}</div>
+                    </div>
+                    <a href="/descargar/${encodeURIComponent(r.salida)}">
+                        <button class="btn btn-download">⬇ Descargar</button>
+                    </a>
+                </div>`;
+        }
+        for (const e of errores) {
+            html += `
+                <div class="resultado-item error-item">
+                    <div class="info">
+                        <div class="nombre">${e.nombre}<span class="badge badge-err">ERROR</span></div>
+                        <div class="detalle">${e.error}</div>
+                    </div>
+                </div>`;
+        }
+
+        document.getElementById('listaResultados').innerHTML = html;
+        document.getElementById('accionesZip').style.display = resultados.length > 1 ? 'block' : 'none';
+        document.getElementById('resultados').style.display = 'block';
+    }
+
+    function descargarTodo() {
+        window.location.href = '/descargar_todo';
+    }
+</script>
+</body>
+</html>

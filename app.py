@@ -1,0 +1,182 @@
+"""
+app.py - Generador de Planillas Angus
+Flask app para procesar archivos PIQUEO y generar planillas completadas
+"""
+
+import os, re, shutil, zipfile
+from pathlib import Path
+from flask import Flask, render_template, request, send_file, jsonify
+import pandas as pd
+from openpyxl import load_workbook
+
+app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
+
+UPLOAD_FOLDER = Path('/tmp/uploads')
+OUTPUT_FOLDER = Path('/tmp/outputs')
+UPLOAD_FOLDER.mkdir(exist_ok=True)
+OUTPUT_FOLDER.mkdir(exist_ok=True)
+
+PLANILLA_BASE = Path(__file__).parent / 'Planilla_BASE_.xlsx'
+
+
+def find_data_sheet(xl):
+    for s in xl.sheet_names:
+        if 'hoja' in s.lower():
+            return s
+    for s in xl.sheet_names:
+        if 'pegar' in s.lower():
+            return s
+    return xl.sheet_names[0]
+
+
+def find_header_row(filepath, sheet):
+    raw = pd.read_excel(filepath, sheet_name=sheet, header=None)
+    for i, row in raw.iterrows():
+        if 'Producto' in row.values:
+            return i
+    return 1
+
+
+def extract_tropas(val):
+    if pd.isna(val):
+        return set()
+    found = re.findall(r'\(\d+\)(\d+)', str(val))
+    if found:
+        return set(found)
+    return set(re.findall(r'\d+', str(val)))
+
+
+def process_file(filepath, base_path):
+    filepath = Path(filepath)
+    outpath = OUTPUT_FOLDER / (filepath.stem + '_completada.xlsx')
+
+    xl = pd.ExcelFile(filepath)
+    data_sheet = find_data_sheet(xl)
+    header_row = find_header_row(filepath, data_sheet)
+
+    df = pd.read_excel(filepath, sheet_name=data_sheet, header=header_row)
+
+    # Filtro Angus: solo productos con AA
+    df = df[df['Producto'].astype(str).str.contains(r'\bAA\b', na=False)]
+
+    grouped = (
+        df.groupby('Producto')
+        .agg(Cajas=('Cajas', 'sum'), Peso_kg=('Peso', 'sum'), Peso_Bruto=('Bruto', 'sum'))
+        .reset_index()
+    )
+
+    all_tropas = set()
+    for t in df['Tropa'].dropna():
+        all_tropas.update(extract_tropas(t))
+    tropas_str = ', '.join(sorted(all_tropas, key=lambda x: int(x)))
+
+    all_lotes = set()
+    for d in df['Fecha P'].dropna():
+        all_lotes.add(pd.Timestamp(d).strftime('%d/%m/%Y'))
+    lotes_str = ', '.join(sorted(all_lotes))
+
+    has_planilla = any('PLANILLA' in s.upper() for s in xl.sheet_names)
+    if has_planilla:
+        shutil.copy(filepath, outpath)
+        base_note = ''
+    else:
+        shutil.copy(base_path, outpath)
+        base_note = ' [usó Planilla_BASE_]'
+
+    wb = load_workbook(outpath)
+    ws = wb[next(s for s in wb.sheetnames if 'PLANILLA' in s.upper())]
+
+    for i, row_data in grouped.iterrows():
+        excel_row = 34 + i
+        if excel_row > 63:
+            break
+        ws[f'E{excel_row}'] = row_data['Producto']
+        ws[f'F{excel_row}'] = round(float(row_data['Cajas']), 0)
+        ws[f'G{excel_row}'] = round(float(row_data['Peso_kg']), 2)
+        ws[f'L{excel_row}'] = round(float(row_data['Peso_Bruto']), 2)
+
+    ws['E69'] = tropas_str
+    ws['E70'] = lotes_str
+    wb.save(outpath)
+
+    return {
+        'nombre': filepath.name,
+        'salida': filepath.stem + '_completada.xlsx',
+        'cortes': len(grouped),
+        'tropas': len(all_tropas),
+        'lotes': len(all_lotes),
+        'base_note': base_note,
+    }
+
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+
+@app.route('/procesar', methods=['POST'])
+def procesar():
+    piqueo_files = request.files.getlist('piqueo_files')
+    base_file = request.files.get('planilla_base')
+
+    if not piqueo_files or all(f.filename == '' for f in piqueo_files):
+        return jsonify({'error': 'No seleccionaste archivos PIQUEO'}), 400
+
+    # Limpiar carpetas
+    for f in UPLOAD_FOLDER.glob('*'):
+        f.unlink()
+    for f in OUTPUT_FOLDER.glob('*'):
+        f.unlink()
+
+    # Guardar Planilla BASE
+    if base_file and base_file.filename:
+        base_path = UPLOAD_FOLDER / 'Planilla_BASE_.xlsx'
+        base_file.save(base_path)
+    elif PLANILLA_BASE.exists():
+        base_path = PLANILLA_BASE
+    else:
+        return jsonify({'error': 'No se encontró Planilla_BASE_.xlsx'}), 400
+
+    resultados = []
+    errores = []
+
+    for f in piqueo_files:
+        if f.filename == '':
+            continue
+        save_path = UPLOAD_FOLDER / f.filename
+        f.save(save_path)
+        try:
+            r = process_file(save_path, base_path)
+            resultados.append(r)
+        except Exception as e:
+            errores.append({'nombre': f.filename, 'error': str(e)})
+
+    return jsonify({'resultados': resultados, 'errores': errores})
+
+
+@app.route('/descargar/<filename>')
+def descargar(filename):
+    filepath = OUTPUT_FOLDER / filename
+    if not filepath.exists():
+        return 'Archivo no encontrado', 404
+    return send_file(filepath, as_attachment=True)
+
+
+@app.route('/descargar_todo')
+def descargar_todo():
+    archivos = list(OUTPUT_FOLDER.glob('*_completada.xlsx'))
+    if not archivos:
+        return 'No hay archivos para descargar', 404
+
+    zip_path = OUTPUT_FOLDER / 'planillas_completadas.zip'
+    with zipfile.ZipFile(zip_path, 'w') as zf:
+        for f in archivos:
+            zf.write(f, f.name)
+
+    return send_file(zip_path, as_attachment=True)
+
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)

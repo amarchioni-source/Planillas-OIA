@@ -2,7 +2,6 @@
 app.py - Generador de Planillas Angus
 Flask app para procesar archivos PIQUEO y generar planillas completadas
 """
-
 import os, re, shutil, zipfile
 from pathlib import Path
 from flask import Flask, render_template, request, send_file, jsonify
@@ -20,22 +19,29 @@ OUTPUT_FOLDER.mkdir(exist_ok=True)
 PLANILLA_BASE = Path(__file__).parent / 'Planilla_BASE_.xlsx'
 
 
-def find_data_sheet(xl):
-    for s in xl.sheet_names:
-        if 'hoja' in s.lower():
-            return s
-    for s in xl.sheet_names:
-        if 'pegar' in s.lower():
-            return s
-    return xl.sheet_names[0]
+def find_data_sheet_and_header(filepath, xl):
+    """
+    Busca la hoja Y fila de encabezado que contenga 'Producto'.
+    Prueba todas las hojas en orden de prioridad.
+    """
+    def priority(name):
+        n = name.lower()
+        if 'hoja' in n:     return 0
+        if 'pegar' in n:    return 1
+        if 'extracto' in n: return 9
+        return 5
 
+    for sheet in sorted(xl.sheet_names, key=priority):
+        raw = pd.read_excel(filepath, sheet_name=sheet, header=None)
+        for i, row in raw.iterrows():
+            for val in row.values:
+                if str(val).strip().lower() == 'producto':
+                    return sheet, i
 
-def find_header_row(filepath, sheet):
-    raw = pd.read_excel(filepath, sheet_name=sheet, header=None)
-    for i, row in raw.iterrows():
-        if 'Producto' in row.values:
-            return i
-    return 1
+    raise ValueError(
+        f"No se encontró columna 'Producto' en ninguna hoja. "
+        f"Hojas disponibles: {xl.sheet_names}"
+    )
 
 
 def extract_tropas(val):
@@ -52,10 +58,12 @@ def process_file(filepath, base_path):
     outpath = OUTPUT_FOLDER / (filepath.stem + '_completada.xlsx')
 
     xl = pd.ExcelFile(filepath)
-    data_sheet = find_data_sheet(xl)
-    header_row = find_header_row(filepath, data_sheet)
+    data_sheet, header_row = find_data_sheet_and_header(filepath, xl)
 
     df = pd.read_excel(filepath, sheet_name=data_sheet, header=header_row)
+
+    # Normalizar nombres de columna
+    df.columns = [str(c).strip() for c in df.columns]
 
     # Filtro Angus: solo productos con AA
     df = df[df['Producto'].astype(str).str.contains(r'\bAA\b', na=False)]
@@ -168,12 +176,10 @@ def descargar_todo():
     archivos = list(OUTPUT_FOLDER.glob('*_completada.xlsx'))
     if not archivos:
         return 'No hay archivos para descargar', 404
-
     zip_path = OUTPUT_FOLDER / 'planillas_completadas.zip'
     with zipfile.ZipFile(zip_path, 'w') as zf:
         for f in archivos:
             zf.write(f, f.name)
-
     return send_file(zip_path, as_attachment=True)
 
 

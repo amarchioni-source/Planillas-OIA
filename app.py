@@ -123,7 +123,7 @@ def process_file(filepath, base_path, translation_dict=None):
 
     # Buscar columna de código por nombre (case-insensitive)
     col_codigo = next(
-        (c for c in df.columns if c.lower() in ('código', 'codigo', 'code', 'cod', 'cod.')),
+        (c for c in df.columns if c.lower() in ('código', 'codigo', 'code', 'cod', 'cod.', 'cod prod', 'cod. prod', 'codigo producto', 'código producto')),
         None
     )
 

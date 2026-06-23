@@ -67,9 +67,10 @@ def build_translation_dict(reporte_path):
 
                 if col_code and col_desc:
                     mapping = {}
-                    for _, r in df[[col_code, col_desc]].dropna(subset=[col_code]).iterrows():
-                        code = str(r[col_code]).strip()
-                        desc = str(r[col_desc]).strip()
+                    sub = df[[col_code, col_desc]].dropna(subset=[col_code]).reset_index(drop=True)
+                    for idx in range(len(sub)):
+                        code = str(sub[col_code].iloc[idx]).strip()
+                        desc = str(sub[col_desc].iloc[idx]).strip()
                         if code and desc and code != 'nan':
                             mapping[code] = desc
                     return mapping

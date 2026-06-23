@@ -47,33 +47,50 @@ def find_data_sheet_and_header(filepath, xl):
 def build_translation_dict(reporte_path):
     """
     Lee el REPORTE DOC y construye un diccionario {código: descripción_inglés}.
-    Busca columnas por nombre ('Code' y 'Description'), ignorando mayúsculas.
+    Lee solo 20 filas para encontrar el encabezado, luego carga únicamente
+    las dos columnas necesarias para minimizar uso de RAM.
     """
     xl = pd.ExcelFile(reporte_path)
 
     for sheet in xl.sheet_names:
-        raw = pd.read_excel(reporte_path, sheet_name=sheet, header=None)
+        # Leer solo primeras 20 filas para encontrar el encabezado
+        raw = pd.read_excel(reporte_path, sheet_name=sheet, header=None, nrows=20)
 
-        # Buscar fila de encabezado que tenga 'code' y 'description'
+        header_row = None
+        col_code_idx = None
+        col_desc_idx = None
         for i, row in raw.iterrows():
             vals = [str(v).strip().lower() for v in row.values]
             if 'code' in vals and 'description' in vals:
-                df = pd.read_excel(reporte_path, sheet_name=sheet, header=i)
-                df.columns = [str(c).strip() for c in df.columns]
+                header_row = i
+                col_code_idx = vals.index('code')
+                col_desc_idx = vals.index('description')
+                break
 
-                # Encontrar nombres exactos de columna (case-insensitive)
-                col_code = next((c for c in df.columns if c.lower() == 'code'), None)
-                col_desc = next((c for c in df.columns if c.lower() == 'description'), None)
+        if header_row is None:
+            continue
 
-                if col_code and col_desc:
-                    mapping = {}
-                    sub = df[[col_code, col_desc]].dropna(subset=[col_code]).reset_index(drop=True)
-                    for idx in range(len(sub)):
-                        code = str(sub[col_code].iloc[idx]).strip()
-                        desc = str(sub[col_desc].iloc[idx]).strip()
-                        if code and desc and code != 'nan':
-                            mapping[code] = desc
-                    return mapping
+        # Leer solo las dos columnas necesarias por índice de posición
+        df = pd.read_excel(
+            reporte_path,
+            sheet_name=sheet,
+            header=header_row,
+            usecols=[col_code_idx, col_desc_idx]
+        )
+        df.columns = [str(c).strip() for c in df.columns]
+
+        col_code = next((c for c in df.columns if c.lower() == 'code'), None)
+        col_desc = next((c for c in df.columns if c.lower() == 'description'), None)
+
+        if col_code and col_desc:
+            mapping = {}
+            df = df.dropna(subset=[col_code]).reset_index(drop=True)
+            for idx in range(len(df)):
+                code = str(df[col_code].iloc[idx]).strip()
+                desc = str(df[col_desc].iloc[idx]).strip()
+                if code and desc and code != 'nan':
+                    mapping[code] = desc
+            return mapping
 
     raise ValueError(
         "No se encontraron columnas 'Code' y 'Description' en el REPORTE DOC."

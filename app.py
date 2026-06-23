@@ -44,6 +44,41 @@ def find_data_sheet_and_header(filepath, xl):
     )
 
 
+def build_translation_dict(reporte_path):
+    """
+    Lee el REPORTE DOC y construye un diccionario {código: descripción_inglés}.
+    Busca columnas por nombre ('Code' y 'Description'), ignorando mayúsculas.
+    """
+    xl = pd.ExcelFile(reporte_path)
+
+    for sheet in xl.sheet_names:
+        raw = pd.read_excel(reporte_path, sheet_name=sheet, header=None)
+
+        # Buscar fila de encabezado que tenga 'code' y 'description'
+        for i, row in raw.iterrows():
+            vals = [str(v).strip().lower() for v in row.values]
+            if 'code' in vals and 'description' in vals:
+                df = pd.read_excel(reporte_path, sheet_name=sheet, header=i)
+                df.columns = [str(c).strip() for c in df.columns]
+
+                # Encontrar nombres exactos de columna (case-insensitive)
+                col_code = next((c for c in df.columns if c.lower() == 'code'), None)
+                col_desc = next((c for c in df.columns if c.lower() == 'description'), None)
+
+                if col_code and col_desc:
+                    mapping = {}
+                    for _, r in df[[col_code, col_desc]].dropna(subset=[col_code]).iterrows():
+                        code = str(r[col_code]).strip()
+                        desc = str(r[col_desc]).strip()
+                        if code and desc and code != 'nan':
+                            mapping[code] = desc
+                    return mapping
+
+    raise ValueError(
+        "No se encontraron columnas 'Code' y 'Description' en el REPORTE DOC."
+    )
+
+
 def extract_tropas(val):
     if pd.isna(val):
         return set()
@@ -53,7 +88,7 @@ def extract_tropas(val):
     return set(re.findall(r'\d+', str(val)))
 
 
-def process_file(filepath, base_path):
+def process_file(filepath, base_path, translation_dict=None):
     filepath = Path(filepath)
     outpath = OUTPUT_FOLDER / (filepath.stem + '_completada.xlsx')
 
@@ -65,14 +100,41 @@ def process_file(filepath, base_path):
     # Normalizar nombres de columna
     df.columns = [str(c).strip() for c in df.columns]
 
-    # Filtro Angus: solo productos con AA
+    # Filtro Angus: solo productos con AA en columna Producto
     df = df[df['Producto'].astype(str).str.contains(r'\bAA\b', na=False)]
+
+    # Buscar columna de código por nombre (case-insensitive)
+    col_codigo = next(
+        (c for c in df.columns if c.lower() in ('código', 'codigo', 'code', 'cod', 'cod.')),
+        None
+    )
 
     grouped = (
         df.groupby('Producto')
         .agg(Cajas=('Cajas', 'sum'), Peso_kg=('Peso', 'sum'), Peso_Bruto=('Bruto', 'sum'))
         .reset_index()
     )
+
+    # Si hay REPORTE DOC, agregar columna de código y traducir descripción
+    if translation_dict and col_codigo:
+        # Tomar el primer código asociado a cada Producto
+        codigo_por_producto = (
+            df.groupby('Producto')[col_codigo]
+            .first()
+            .reset_index()
+        )
+        codigo_por_producto.columns = ['Producto', 'Codigo']
+        grouped = grouped.merge(codigo_por_producto, on='Producto', how='left')
+
+        def get_description(row):
+            codigo = str(row.get('Codigo', '')).strip()
+            if codigo and codigo != 'nan' and codigo in translation_dict:
+                return translation_dict[codigo]
+            return row['Producto']  # fallback al original
+
+        grouped['Descripcion'] = grouped.apply(get_description, axis=1)
+    else:
+        grouped['Descripcion'] = grouped['Producto']
 
     all_tropas = set()
     for t in df['Tropa'].dropna():
@@ -99,7 +161,7 @@ def process_file(filepath, base_path):
         excel_row = 34 + i
         if excel_row > 63:
             break
-        ws[f'E{excel_row}'] = row_data['Producto']
+        ws[f'E{excel_row}'] = row_data['Descripcion']   # descripción inglés (o original si no matchea)
         ws[f'F{excel_row}'] = round(float(row_data['Cajas']), 0)
         ws[f'G{excel_row}'] = round(float(row_data['Peso_kg']), 2)
         ws[f'L{excel_row}'] = round(float(row_data['Peso_Bruto']), 2)
@@ -108,6 +170,13 @@ def process_file(filepath, base_path):
     ws['E70'] = lotes_str
     wb.save(outpath)
 
+    # Contar cuántos matchearon
+    matched = 0
+    if translation_dict and 'Codigo' in grouped.columns:
+        matched = grouped['Codigo'].apply(
+            lambda c: str(c).strip() in translation_dict
+        ).sum()
+
     return {
         'nombre': filepath.name,
         'salida': filepath.stem + '_completada.xlsx',
@@ -115,6 +184,8 @@ def process_file(filepath, base_path):
         'tropas': len(all_tropas),
         'lotes': len(all_lotes),
         'base_note': base_note,
+        'traducidos': int(matched),
+        'sin_traduccion': int(len(grouped) - matched),
     }
 
 
@@ -127,9 +198,13 @@ def index():
 def procesar():
     piqueo_files = request.files.getlist('piqueo_files')
     base_file = request.files.get('planilla_base')
+    reporte_file = request.files.get('reporte_doc')
 
     if not piqueo_files or all(f.filename == '' for f in piqueo_files):
         return jsonify({'error': 'No seleccionaste archivos PIQUEO'}), 400
+
+    if not reporte_file or reporte_file.filename == '':
+        return jsonify({'error': 'Tenés que subir el REPORTE DOC para obtener las descripciones en inglés'}), 400
 
     # Limpiar carpetas
     for f in UPLOAD_FOLDER.glob('*'):
@@ -146,6 +221,14 @@ def procesar():
     else:
         return jsonify({'error': 'No se encontró Planilla_BASE_.xlsx'}), 400
 
+    # Guardar y procesar REPORTE DOC
+    reporte_path = UPLOAD_FOLDER / reporte_file.filename
+    reporte_file.save(reporte_path)
+    try:
+        translation_dict = build_translation_dict(reporte_path)
+    except Exception as e:
+        return jsonify({'error': f'Error leyendo REPORTE DOC: {str(e)}'}), 400
+
     resultados = []
     errores = []
 
@@ -155,7 +238,7 @@ def procesar():
         save_path = UPLOAD_FOLDER / f.filename
         f.save(save_path)
         try:
-            r = process_file(save_path, base_path)
+            r = process_file(save_path, base_path, translation_dict)
             resultados.append(r)
         except Exception as e:
             errores.append({'nombre': f.filename, 'error': str(e)})

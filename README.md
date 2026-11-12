@@ -38,6 +38,7 @@ planillas-app/
 - Se agrupa por `Producto`: cajas = suma `Cartons`, neto = suma `Net W`, bruto = suma `Gross`
 - Descripción en inglés (columna E) = columna `Product` del romaneo
 - Lotes (E70) = fechas de `Prod Date`
+- N° de Venta (E32 y E71) = EXPORTER REFERENCE del Packing List
 - Consignee (E25) = bloque CONSIGNEE del Packing List. Cada romaneo se empareja con su Packing List por códigos de producto (CDxxxxx) y total de cajas; si se sube un solo romaneo y un solo Packing List, se usan juntos directamente
 
 - Nombre del archivo: siempre `PLANILLA OIA <N° de venta>.xlsx`, con el N° de venta del Packing List (EXPORTER REFERENCE)

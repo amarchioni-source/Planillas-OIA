@@ -251,6 +251,13 @@ def process_file(filepath, packing_lists=None, solo_uno=False):
     ws['E70'] = lotes_str
 
     # CONSIGNEE (E25) desde el packing list
+    # N° de Venta (secciones 5 y 6) desde EXPORTER REFERENCE del packing list
+    venta = pl['venta'].strip()
+    venta_val = int(venta) if venta.isdigit() else venta
+    for celda in ('E32', 'E71'):
+        ws[celda] = venta_val
+        ws[celda].alignment = ws[celda].alignment.copy(horizontal='left')
+
     ws['E25'] = pl['consignee']
     ws['E25'].alignment = ws['E25'].alignment.copy(wrap_text=True, vertical='top')
     consignee_info = {

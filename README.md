@@ -35,7 +35,7 @@ planillas-app/
 ## Reglas de procesamiento
 
 - Columnas del romaneo usadas: `Producto`, `Product`, `Cod Prod`, `Cartons`, `Net W`, `Gross`, `Tropa`, `Prod Date`
-- Se agrupa por `Producto`: cajas = suma `Cartons`, neto = suma `Net W`, bruto = suma `Gross`
+- Se agrupa por `Producto`: cajas = suma `Cartons`, neto = suma `Net W` redondeado a kg enteros, bruto = suma `Gross` (2 decimales)
 - Descripción en inglés (columna E) = columna `Product` del romaneo
 - Lotes (E70) = fechas de `Prod Date`
 - N° de Venta (E32 y E71) = EXPORTER REFERENCE del Packing List

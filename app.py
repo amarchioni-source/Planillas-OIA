@@ -2,7 +2,7 @@
 app.py - Generador de Planillas Angus
 Flask app para procesar archivos ROMANEO y generar planillas completadas
 """
-import os, re, shutil, zipfile
+import math, os, re, shutil, zipfile
 from pathlib import Path
 from flask import Flask, render_template, request, send_file, jsonify
 import pandas as pd
@@ -244,7 +244,8 @@ def process_file(filepath, packing_lists=None, solo_uno=False):
             break
         ws[f'E{excel_row}'] = row_data['Descripcion']
         ws[f'F{excel_row}'] = round(float(row_data['Cajas']), 0)
-        ws[f'G{excel_row}'] = round(float(row_data['Peso_kg']), 2)
+        # Neto redondeado a kg enteros (0,5 redondea para arriba); el bruto queda con 2 decimales
+        ws[f'G{excel_row}'] = int(math.floor(float(row_data['Peso_kg']) + 0.5))
         ws[f'L{excel_row}'] = round(float(row_data['Peso_Bruto']), 2)
 
     ws['E69'] = tropas_str

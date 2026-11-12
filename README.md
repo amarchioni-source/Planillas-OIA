@@ -1,6 +1,6 @@
 # Generador de Planillas Angus
 
-App web para procesar archivos PIQUEO y generar planillas completadas con cortes AA.
+App web para procesar archivos ROMANEO ("Detalle de cargas remito ...") y generar planillas completadas con cortes AA.
 
 ## Estructura
 
@@ -28,11 +28,16 @@ planillas-app/
 
 ## Uso
 
-- Subís uno o varios archivos PIQUEO (.xlsx)
+- Subís uno o varios archivos ROMANEO (.xlsx)
+- Opcionalmente subís el REPORTE DOC (si no, la descripción en inglés sale de la columna `Product` del romaneo)
 - Opcionalmente subís la Planilla_BASE_ (si no está en el servidor)
 - Procesás y descargás cada planilla o todas juntas en ZIP
 
 ## Reglas de procesamiento
+
+- Columnas del romaneo usadas: `Producto`, `Product`, `Cod Prod`, `Old Code`, `Cartons`, `Net W`, `Gross`, `Tropa`, `Prod Date`
+- Se agrupa por `Producto`: cajas = suma `Cartons`, neto = suma `Net W`, bruto = suma `Gross`
+- Lotes (E70) = fechas de `Prod Date`
 
 - Solo incluye cortes cuyo Producto contenga **AA** (Angus)
 - Cortes se escriben en filas **34 a 63** (máx 30 cortes)

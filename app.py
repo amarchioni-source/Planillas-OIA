@@ -1,6 +1,6 @@
 """
 app.py - Generador de Planillas Angus
-Flask app para procesar archivos PIQUEO y generar planillas completadas
+Flask app para procesar archivos ROMANEO y generar planillas completadas
 """
 import os, re, shutil, zipfile
 from pathlib import Path
@@ -104,6 +104,27 @@ def extract_tropas(val):
     return set(re.findall(r'\d+', str(val)))
 
 
+# Columnas del ROMANEO ("Detalle de cargas remito ...")
+COL_PRODUCTO = 'Producto'     # descripción en castellano (se usa para agrupar y filtrar AA)
+COL_PRODUCT_EN = 'Product'    # descripción en inglés que ya trae el romaneo
+COL_CODIGO = 'Cod Prod'
+COL_OLD_CODE = 'Old Code'
+COL_CAJAS = 'Cartons'
+COL_NETO = 'Net W'
+COL_BRUTO = 'Gross'
+COL_TROPA = 'Tropa'
+COL_FECHA_PROD = 'Prod Date'
+
+COLUMNAS_REQUERIDAS = [COL_PRODUCTO, COL_CAJAS, COL_NETO, COL_BRUTO, COL_TROPA, COL_FECHA_PROD]
+
+
+def _clean_code(val):
+    s = str(val).strip()
+    if s.endswith('.0'):
+        s = s[:-2]
+    return '' if s.lower() == 'nan' else s
+
+
 def process_file(filepath, base_path, translation_dict=None):
     filepath = Path(filepath)
     outpath = OUTPUT_FOLDER / (filepath.stem + '_completada.xlsx')
@@ -116,50 +137,60 @@ def process_file(filepath, base_path, translation_dict=None):
     # Normalizar nombres de columna
     df.columns = [str(c).strip() for c in df.columns]
 
-    # Filtro Angus: solo productos con AA en columna Producto
-    df = df[df['Producto'].astype(str).str.contains(r'\bAA\b', na=False)]
+    faltantes = [c for c in COLUMNAS_REQUERIDAS if c not in df.columns]
+    if faltantes:
+        raise ValueError(
+            f"El archivo no parece un ROMANEO: faltan columnas {faltantes}. "
+            f"Columnas encontradas: {list(df.columns)}"
+        )
 
-    # Buscar columna de código por nombre (case-insensitive)
-    col_codigo = next(
-        (c for c in df.columns if c.lower() in ('código', 'codigo', 'code', 'cod', 'cod.', 'cod prod', 'cod. prod', 'codigo producto', 'código producto')),
-        None
-    )
+    # Descartar filas vacías / totales (sin producto)
+    df = df[df[COL_PRODUCTO].notna()]
+
+    # Filtro Angus: solo productos con AA en columna Producto
+    df = df[df[COL_PRODUCTO].astype(str).str.contains(r'\bAA\b', na=False)]
+
+    for c in (COL_CAJAS, COL_NETO, COL_BRUTO):
+        df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
 
     grouped = (
-        df.groupby('Producto')
-        .agg(Cajas=('Cajas', 'sum'), Peso_kg=('Peso', 'sum'), Peso_Bruto=('Bruto', 'sum'))
+        df.groupby(COL_PRODUCTO, sort=True)
+        .agg(Cajas=(COL_CAJAS, 'sum'), Peso_kg=(COL_NETO, 'sum'), Peso_Bruto=(COL_BRUTO, 'sum'))
         .reset_index()
+        .rename(columns={COL_PRODUCTO: 'Producto'})
     )
 
-    # Si hay REPORTE DOC, agregar columna de código y traducir descripción
-    if translation_dict and col_codigo:
-        codigo_por_producto = (
-            df.groupby('Producto')[col_codigo]
-            .first()
-            .reset_index()
-        )
-        codigo_por_producto.columns = ['Producto', 'Codigo']
-        grouped = grouped.merge(codigo_por_producto, on='Producto', how='left')
+    # Descripción en inglés: 1) REPORTE DOC por Cod Prod / Old Code,
+    # 2) columna 'Product' del romaneo, 3) Producto original.
+    first = df.groupby(COL_PRODUCTO).first()
 
-        def get_description(row):
-            codigo = str(row.get('Codigo', '')).strip()
-            if codigo and codigo != 'nan' and codigo in translation_dict:
-                return translation_dict[codigo]
-            return row['Producto']  # fallback al original
+    def get_description(producto):
+        row = first.loc[producto]
+        if translation_dict:
+            for col in (COL_CODIGO, COL_OLD_CODE):
+                if col in row.index:
+                    code = _clean_code(row[col])
+                    if code and code in translation_dict:
+                        return translation_dict[code], True
+        if COL_PRODUCT_EN in row.index:
+            en = str(row[COL_PRODUCT_EN]).strip()
+            if en and en.lower() != 'nan':
+                return en, False
+        return producto, False
 
-        grouped['Descripcion'] = grouped.apply(get_description, axis=1)
-    else:
-        grouped['Descripcion'] = grouped['Producto']
+    descs = grouped['Producto'].apply(get_description)
+    grouped['Descripcion'] = descs.apply(lambda t: t[0])
+    grouped['EnReporte'] = descs.apply(lambda t: t[1])
 
     all_tropas = set()
-    for t in df['Tropa'].dropna():
+    for t in df[COL_TROPA].dropna():
         all_tropas.update(extract_tropas(t))
     tropas_str = ', '.join(sorted(all_tropas, key=lambda x: int(x)))
 
     all_lotes = set()
-    for d in df['Fecha P'].dropna():
-        all_lotes.add(pd.Timestamp(d).strftime('%d/%m/%Y'))
-    lotes_str = ', '.join(sorted(all_lotes))
+    for d in df[COL_FECHA_PROD].dropna():
+        all_lotes.add(pd.Timestamp(d).normalize())
+    lotes_str = ', '.join(d.strftime('%d/%m/%Y') for d in sorted(all_lotes))
 
     has_planilla = any('PLANILLA' in s.upper() for s in xl.sheet_names)
     if has_planilla:
@@ -185,11 +216,7 @@ def process_file(filepath, base_path, translation_dict=None):
     ws['E70'] = lotes_str
     wb.save(outpath)
 
-    matched = 0
-    if translation_dict and 'Codigo' in grouped.columns:
-        matched = grouped['Codigo'].apply(
-            lambda c: str(c).strip() in translation_dict
-        ).sum()
+    matched = int(grouped['EnReporte'].sum()) if translation_dict else 0
 
     return {
         'nombre': filepath.name,
@@ -199,7 +226,7 @@ def process_file(filepath, base_path, translation_dict=None):
         'lotes': len(all_lotes),
         'base_note': base_note,
         'traducidos': int(matched),
-        'sin_traduccion': int(len(grouped) - matched),
+        'sin_traduccion': int(len(grouped) - matched) if translation_dict else 0,
     }
 
 
@@ -210,15 +237,12 @@ def index():
 
 @app.route('/procesar', methods=['POST'])
 def procesar():
-    piqueo_files = request.files.getlist('piqueo_files')
+    romaneo_files = request.files.getlist('romaneo_files')
     base_file = request.files.get('planilla_base')
     reporte_file = request.files.get('reporte_doc')
 
-    if not piqueo_files or all(f.filename == '' for f in piqueo_files):
-        return jsonify({'error': 'No seleccionaste archivos PIQUEO'}), 400
-
-    if not reporte_file or reporte_file.filename == '':
-        return jsonify({'error': 'Tenés que subir el REPORTE DOC para obtener las descripciones en inglés'}), 400
+    if not romaneo_files or all(f.filename == '' for f in romaneo_files):
+        return jsonify({'error': 'No seleccionaste archivos ROMANEO'}), 400
 
     for f in UPLOAD_FOLDER.glob('*'):
         f.unlink()
@@ -233,17 +257,20 @@ def procesar():
     else:
         return jsonify({'error': 'No se encontró Planilla_BASE_.xlsx'}), 400
 
-    reporte_path = UPLOAD_FOLDER / reporte_file.filename
-    reporte_file.save(reporte_path)
-    try:
-        translation_dict = build_translation_dict(reporte_path)
-    except Exception as e:
-        return jsonify({'error': f'Error leyendo REPORTE DOC: {str(e)}'}), 400
+    # REPORTE DOC opcional: si no viene, se usa la columna 'Product' del romaneo
+    translation_dict = None
+    if reporte_file and reporte_file.filename:
+        reporte_path = UPLOAD_FOLDER / reporte_file.filename
+        reporte_file.save(reporte_path)
+        try:
+            translation_dict = build_translation_dict(reporte_path)
+        except Exception as e:
+            return jsonify({'error': f'Error leyendo REPORTE DOC: {str(e)}'}), 400
 
     resultados = []
     errores = []
 
-    for f in piqueo_files:
+    for f in romaneo_files:
         if f.filename == '':
             continue
         save_path = UPLOAD_FOLDER / f.filename

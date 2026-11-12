@@ -232,22 +232,22 @@
 
     <header>
         <h1>🥩 Generador de Planillas Angus</h1>
-        <p>Procesá archivos PIQUEO y descargá las planillas completadas con cortes AA</p>
+        <p>Procesá archivos ROMANEO y descargá las planillas completadas con cortes AA</p>
     </header>
 
     <div class="card">
-        <h2>📂 Archivos PIQUEO</h2>
-        <div class="upload-zone" id="piqueoZone" onclick="document.getElementById('piqueoInput').click()">
+        <h2>📂 Archivos ROMANEO</h2>
+        <div class="upload-zone" id="romaneoZone" onclick="document.getElementById('romaneoInput').click()">
             <div class="icon">📊</div>
-            <div class="label">Hacé click o arrastrá los archivos PIQUEO acá</div>
+            <div class="label">Hacé click o arrastrá los archivos ROMANEO acá (ej. Romaneo_0017-00017475.xlsx)</div>
             <div class="sublabel">Podés seleccionar varios a la vez (.xlsx)</div>
-            <input type="file" id="piqueoInput" accept=".xlsx" multiple>
-            <div class="file-count" id="piqueoCount"></div>
+            <input type="file" id="romaneoInput" accept=".xlsx" multiple>
+            <div class="file-count" id="romaneoCount"></div>
         </div>
     </div>
 
     <div class="card">
-        <h2>📊 REPORTE DOC <span style="font-weight:400;color:#c05621;font-size:0.85rem">(obligatorio — descripciones en inglés)</span></h2>
+        <h2>📊 REPORTE DOC <span style="font-weight:400;color:#c05621;font-size:0.85rem">(opcional — si no se sube, se usa la columna Product del romaneo)</span></h2>
         <div class="upload-zone reporte-zone" id="reporteZone" onclick="document.getElementById('reporteInput').click()">
             <div class="icon">🌐</div>
             <div class="label">Subí el REPORTE DOC con los shipments</div>
@@ -262,7 +262,7 @@
         <div class="upload-zone base-zone" id="baseZone" onclick="document.getElementById('baseInput').click()">
             <div class="icon">📄</div>
             <div class="label">Subí la Planilla_BASE_.xlsx</div>
-            <div class="sublabel">Se usa si el archivo PIQUEO no tiene hoja PLANILLA</div>
+            <div class="sublabel">Se usa como plantilla para completar cada romaneo</div>
             <input type="file" id="baseInput" accept=".xlsx">
             <div class="file-count" id="baseCount"></div>
         </div>
@@ -292,14 +292,14 @@
 </div>
 
 <script>
-    const piqueoInput = document.getElementById('piqueoInput');
+    const romaneoInput = document.getElementById('romaneoInput');
     const baseInput = document.getElementById('baseInput');
     const reporteInput = document.getElementById('reporteInput');
-    const piqueoZone = document.getElementById('piqueoZone');
+    const romaneoZone = document.getElementById('romaneoZone');
 
-    piqueoInput.addEventListener('change', () => {
-        const n = piqueoInput.files.length;
-        document.getElementById('piqueoCount').textContent = n > 0 ? `${n} archivo${n > 1 ? 's' : ''} seleccionado${n > 1 ? 's' : ''}` : '';
+    romaneoInput.addEventListener('change', () => {
+        const n = romaneoInput.files.length;
+        document.getElementById('romaneoCount').textContent = n > 0 ? `${n} archivo${n > 1 ? 's' : ''} seleccionado${n > 1 ? 's' : ''}` : '';
     });
 
     baseInput.addEventListener('change', () => {
@@ -312,33 +312,29 @@
         document.getElementById('reporteCount').textContent = f ? `✓ ${f.name}` : '';
     });
 
-    // Drag & drop PIQUEO
-    piqueoZone.addEventListener('dragover', e => { e.preventDefault(); piqueoZone.classList.add('dragover'); });
-    piqueoZone.addEventListener('dragleave', () => piqueoZone.classList.remove('dragover'));
-    piqueoZone.addEventListener('drop', e => {
+    // Drag & drop ROMANEO
+    romaneoZone.addEventListener('dragover', e => { e.preventDefault(); romaneoZone.classList.add('dragover'); });
+    romaneoZone.addEventListener('dragleave', () => romaneoZone.classList.remove('dragover'));
+    romaneoZone.addEventListener('drop', e => {
         e.preventDefault();
-        piqueoZone.classList.remove('dragover');
-        piqueoInput.files = e.dataTransfer.files;
+        romaneoZone.classList.remove('dragover');
+        romaneoInput.files = e.dataTransfer.files;
         const n = e.dataTransfer.files.length;
-        document.getElementById('piqueoCount').textContent = n > 0 ? `${n} archivo${n > 1 ? 's' : ''} seleccionado${n > 1 ? 's' : ''}` : '';
+        document.getElementById('romaneoCount').textContent = n > 0 ? `${n} archivo${n > 1 ? 's' : ''} seleccionado${n > 1 ? 's' : ''}` : '';
     });
 
     async function procesar() {
-        const files = piqueoInput.files;
+        const files = romaneoInput.files;
         if (!files.length) {
-            alert('Seleccioná al menos un archivo PIQUEO');
+            alert('Seleccioná al menos un archivo ROMANEO');
             return;
         }
 
         const reporte = reporteInput.files[0];
-        if (!reporte) {
-            alert('Tenés que subir el REPORTE DOC para obtener las descripciones en inglés');
-            return;
-        }
 
         const formData = new FormData();
-        for (const f of files) formData.append('piqueo_files', f);
-        formData.append('reporte_doc', reporte);
+        for (const f of files) formData.append('romaneo_files', f);
+        if (reporte) formData.append('reporte_doc', reporte);
         const base = baseInput.files[0];
         if (base) formData.append('planilla_base', base);
 
@@ -376,10 +372,10 @@
 
         let html = '';
         for (const r of resultados) {
-            const tradInfo = r.traducidos !== undefined
+            const tradInfo = (r.traducidos > 0 || r.sin_traduccion > 0)
                 ? `<div class="traduccion">
                      <span class="ok">✓ ${r.traducidos} con descripción en inglés</span>
-                     ${r.sin_traduccion > 0 ? `· <span class="warn">⚠ ${r.sin_traduccion} sin match en REPORTE DOC</span>` : ''}
+                     ${r.sin_traduccion > 0 ? `· <span class="warn">⚠ ${r.sin_traduccion} sin match en REPORTE DOC (se usó Product del romaneo)</span>` : ''}
                    </div>`
                 : '';
             html += `

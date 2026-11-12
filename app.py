@@ -125,12 +125,91 @@ def _clean_code(val):
     return '' if s.lower() == 'nan' else s
 
 
-def process_file(filepath, base_path, translation_dict=None):
+# ---------------------------------------------------------------------------
+# PACKING LIST (PDF): de acá sale el CONSIGNEE de cada carga
+# ---------------------------------------------------------------------------
+# Etiquetas de la columna derecha del encabezado del packing list; marcan el
+# fin del bloque CONSIGNEE.
+_PL_FIN_CONSIGNEE = re.compile(
+    r'^(INVOICE DATE|BUYERS REF|EXPORTER REFERENCE|ESTABLISHMENT NO|VESSEL/AIRCRAFT|'
+    r'VOYAGE NO|DEPARTURE DATE|LOADING PORT|DISCHARGE PORT|SHIPPING MARKS|NOTIFY)',
+    re.IGNORECASE,
+)
+
+
+def parse_packing_list(pdf_path):
+    """
+    Lee un PACKING LIST en PDF y devuelve:
+      consignee: texto del bloque CONSIGNEE (una línea por renglón)
+      venta:     EXPORTER REFERENCE (N° de venta)
+      codigos:   códigos de producto (CDxxxxx) que aparecen
+      cajas:     total de cajas (TOTAL : N CTNS)
+    """
+    from pypdf import PdfReader
+
+    reader = PdfReader(str(pdf_path))
+    text = '\n'.join((p.extract_text() or '') for p in reader.pages)
+    lines = [l.strip() for l in text.splitlines()]
+
+    consignee_lines = []
+    try:
+        start = next(i for i, l in enumerate(lines) if l.upper() == 'CONSIGNEE')
+    except StopIteration:
+        start = None
+    if start is not None:
+        for l in lines[start + 1:]:
+            if _PL_FIN_CONSIGNEE.match(l):
+                break
+            if l:
+                consignee_lines.append(l)
+
+    m_venta = re.search(r'EXPORTER REFERENCE\s+(\S+)', text, re.IGNORECASE)
+    m_cajas = re.search(r'TOTAL\s*:\s*([\d.,]+)\s*CTNS', text, re.IGNORECASE)
+    cajas = None
+    if m_cajas:
+        try:
+            cajas = int(float(m_cajas.group(1).replace(',', '')))
+        except ValueError:
+            cajas = None
+
+    return {
+        'archivo': Path(pdf_path).name,
+        'consignee': '\n'.join(consignee_lines),
+        'venta': m_venta.group(1) if m_venta else None,
+        'codigos': set(re.findall(r'\b(CD\d+)\b', text)),
+        'cajas': cajas,
+    }
+
+
+def match_packing_list(packing_lists, codigos, cajas, solo_uno=False):
+    """
+    Elige el packing list que corresponde a un romaneo: mismo total de cajas
+    y mayor coincidencia de códigos de producto. Si hay un solo romaneo y un
+    solo packing list, se usan juntos directamente.
+    """
+    if not packing_lists:
+        return None
+    if solo_uno and len(packing_lists) == 1:
+        return packing_lists[0]
+
+    mejor, mejor_score = None, 0
+    for pl in packing_lists:
+        comunes = len(codigos & pl['codigos'])
+        if not comunes:
+            continue
+        score = comunes + (1000 if pl['cajas'] == cajas else 0)
+        if score > mejor_score:
+            mejor, mejor_score = pl, score
+    return mejor
+
+
+def process_file(filepath, base_path, translation_dict=None, packing_lists=None, solo_uno=False):
     filepath = Path(filepath)
     outpath = OUTPUT_FOLDER / (filepath.stem + '_completada.xlsx')
 
-    xl = pd.ExcelFile(filepath)
-    data_sheet, header_row = find_data_sheet_and_header(filepath, xl)
+    with pd.ExcelFile(filepath) as xl:
+        data_sheet, header_row = find_data_sheet_and_header(filepath, xl)
+        sheet_names = list(xl.sheet_names)
 
     df = pd.read_excel(filepath, sheet_name=data_sheet, header=header_row)
 
@@ -192,7 +271,7 @@ def process_file(filepath, base_path, translation_dict=None):
         all_lotes.add(pd.Timestamp(d).normalize())
     lotes_str = ', '.join(d.strftime('%d/%m/%Y') for d in sorted(all_lotes))
 
-    has_planilla = any('PLANILLA' in s.upper() for s in xl.sheet_names)
+    has_planilla = any('PLANILLA' in s.upper() for s in sheet_names)
     if has_planilla:
         shutil.copy(filepath, outpath)
         base_note = ''
@@ -214,6 +293,22 @@ def process_file(filepath, base_path, translation_dict=None):
 
     ws['E69'] = tropas_str
     ws['E70'] = lotes_str
+
+    # CONSIGNEE (E25) desde el packing list que corresponde a este romaneo
+    codigos = {_clean_code(c) for c in df[COL_CODIGO].dropna()} if COL_CODIGO in df.columns else set()
+    total_cajas = int(round(df[COL_CAJAS].sum()))
+    pl = match_packing_list(packing_lists or [], codigos, total_cajas, solo_uno=solo_uno)
+    consignee_info = None
+    if pl and pl['consignee']:
+        ws['E25'] = pl['consignee']
+        ws['E25'].alignment = ws['E25'].alignment.copy(wrap_text=True, vertical='top')
+        consignee_info = {
+            'archivo': pl['archivo'],
+            'nombre': pl['consignee'].splitlines()[0],
+            'cajas_ok': pl['cajas'] == total_cajas,
+            'cajas_pl': pl['cajas'],
+        }
+
     wb.save(outpath)
 
     matched = int(grouped['EnReporte'].sum()) if translation_dict else 0
@@ -227,6 +322,8 @@ def process_file(filepath, base_path, translation_dict=None):
         'base_note': base_note,
         'traducidos': int(matched),
         'sin_traduccion': int(len(grouped) - matched) if translation_dict else 0,
+        'cajas': total_cajas,
+        'consignee': consignee_info,
     }
 
 
@@ -270,13 +367,33 @@ def procesar():
     resultados = []
     errores = []
 
-    for f in romaneo_files:
-        if f.filename == '':
+    # PACKING LISTs (PDF): opcionales, de ahí sale el CONSIGNEE de cada carga
+    packing_lists = []
+    for f in request.files.getlist('packing_lists'):
+        if not f.filename:
             continue
+        pl_path = UPLOAD_FOLDER / f.filename
+        f.save(pl_path)
+        try:
+            pl = parse_packing_list(pl_path)
+            if not pl['consignee']:
+                errores.append({'nombre': f.filename, 'error': 'No se encontró el bloque CONSIGNEE en el Packing List'})
+                continue
+            packing_lists.append(pl)
+        except Exception as e:
+            errores.append({'nombre': f.filename, 'error': f'Error leyendo Packing List: {e}'})
+
+    romaneos_validos = [f for f in romaneo_files if f.filename]
+    solo_uno = len(romaneos_validos) == 1
+
+    for f in romaneos_validos:
         save_path = UPLOAD_FOLDER / f.filename
         f.save(save_path)
         try:
-            r = process_file(save_path, base_path, translation_dict)
+            r = process_file(save_path, base_path, translation_dict,
+                             packing_lists=packing_lists, solo_uno=solo_uno)
+            if packing_lists and not r['consignee']:
+                r['consignee_warn'] = 'No se encontró Packing List para este romaneo (consignee sin completar)'
             resultados.append(r)
         except Exception as e:
             errores.append({'nombre': f.filename, 'error': str(e)})

@@ -96,6 +96,13 @@
         .reporte-zone:hover { border-color: #ed8936; background: #fef3e2; }
         .reporte-zone .file-count { color: #dd6b20; }
 
+        .pl-zone {
+            border: 2px dashed #bee3f8;
+            background: #ebf8ff;
+        }
+        .pl-zone:hover { border-color: #4299e1; background: #e2f0fb; }
+        .pl-zone .file-count { color: #2b6cb0; }
+
         .btn {
             display: inline-block;
             padding: 12px 28px;
@@ -247,6 +254,17 @@
     </div>
 
     <div class="card">
+        <h2>🚚 PACKING LIST <span style="font-weight:400;color:#2b6cb0;font-size:0.85rem">(PDF — completa el CONSIGNEE de cada carga)</span></h2>
+        <div class="upload-zone pl-zone" id="plZone" onclick="document.getElementById('plInput').click()">
+            <div class="icon">📦</div>
+            <div class="label">Subí el Packing List de cada romaneo</div>
+            <div class="sublabel">Podés subir varios; se emparejan solos por códigos de producto y total de cajas</div>
+            <input type="file" id="plInput" accept=".pdf" multiple>
+            <div class="file-count" id="plCount"></div>
+        </div>
+    </div>
+
+    <div class="card">
         <h2>📊 REPORTE DOC <span style="font-weight:400;color:#c05621;font-size:0.85rem">(opcional — si no se sube, se usa la columna Product del romaneo)</span></h2>
         <div class="upload-zone reporte-zone" id="reporteZone" onclick="document.getElementById('reporteInput').click()">
             <div class="icon">🌐</div>
@@ -307,6 +325,21 @@
         document.getElementById('baseCount').textContent = f ? `✓ ${f.name}` : '';
     });
 
+    const plInput = document.getElementById('plInput');
+    const plZone = document.getElementById('plZone');
+    const contarPL = (n) => {
+        document.getElementById('plCount').textContent = n > 0 ? `${n} packing list${n > 1 ? 's' : ''} seleccionado${n > 1 ? 's' : ''}` : '';
+    };
+    plInput.addEventListener('change', () => contarPL(plInput.files.length));
+    plZone.addEventListener('dragover', e => { e.preventDefault(); plZone.classList.add('dragover'); });
+    plZone.addEventListener('dragleave', () => plZone.classList.remove('dragover'));
+    plZone.addEventListener('drop', e => {
+        e.preventDefault();
+        plZone.classList.remove('dragover');
+        plInput.files = e.dataTransfer.files;
+        contarPL(e.dataTransfer.files.length);
+    });
+
     reporteInput.addEventListener('change', () => {
         const f = reporteInput.files[0];
         document.getElementById('reporteCount').textContent = f ? `✓ ${f.name}` : '';
@@ -335,6 +368,7 @@
         const formData = new FormData();
         for (const f of files) formData.append('romaneo_files', f);
         if (reporte) formData.append('reporte_doc', reporte);
+        for (const f of plInput.files) formData.append('packing_lists', f);
         const base = baseInput.files[0];
         if (base) formData.append('planilla_base', base);
 
@@ -378,12 +412,20 @@
                      ${r.sin_traduccion > 0 ? `· <span class="warn">⚠ ${r.sin_traduccion} sin match en REPORTE DOC (se usó Product del romaneo)</span>` : ''}
                    </div>`
                 : '';
+            let consInfo = '';
+            if (r.consignee) {
+                consInfo = `<div class="traduccion"><span class="ok">✓ Consignee: ${r.consignee.nombre} (de ${r.consignee.archivo})</span>
+                    ${r.consignee.cajas_ok ? '' : `· <span class="warn">⚠ el Packing List dice ${r.consignee.cajas_pl ?? '?'} cajas y el romaneo ${r.cajas}</span>`}</div>`;
+            } else if (r.consignee_warn) {
+                consInfo = `<div class="traduccion"><span class="warn">⚠ ${r.consignee_warn}</span></div>`;
+            }
             html += `
                 <div class="resultado-item">
                     <div class="info">
                         <div class="nombre">${r.nombre}<span class="badge badge-ok">OK</span></div>
                         <div class="detalle">${r.cortes} cortes AA · ${r.tropas} tropas · ${r.lotes} lotes${r.base_note}</div>
                         ${tradInfo}
+                        ${consInfo}
                     </div>
                     <a href="/descargar/${encodeURIComponent(r.salida)}">
                         <button class="btn btn-download">⬇ Descargar</button>

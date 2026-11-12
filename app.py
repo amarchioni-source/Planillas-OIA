@@ -44,57 +44,6 @@ def find_data_sheet_and_header(filepath, xl):
     )
 
 
-def build_translation_dict(reporte_path):
-    """
-    Lee el REPORTE DOC y construye un diccionario {código: descripción_inglés}.
-    Lee solo 20 filas para encontrar el encabezado, luego carga únicamente
-    las dos columnas necesarias para minimizar uso de RAM.
-    """
-    xl = pd.ExcelFile(reporte_path)
-
-    for sheet in xl.sheet_names:
-        raw = pd.read_excel(reporte_path, sheet_name=sheet, header=None, nrows=20)
-
-        header_row = None
-        col_code_idx = None
-        col_desc_idx = None
-        for i, row in raw.iterrows():
-            vals = [str(v).strip().lower() for v in row.values]
-            if 'code' in vals and 'description' in vals:
-                header_row = i
-                col_code_idx = vals.index('code')
-                col_desc_idx = vals.index('description')
-                break
-
-        if header_row is None:
-            continue
-
-        df = pd.read_excel(
-            reporte_path,
-            sheet_name=sheet,
-            header=header_row,
-            usecols=[col_code_idx, col_desc_idx]
-        )
-        df.columns = [str(c).strip() for c in df.columns]
-
-        col_code = next((c for c in df.columns if c.lower() == 'code'), None)
-        col_desc = next((c for c in df.columns if c.lower() == 'description'), None)
-
-        if col_code and col_desc:
-            mapping = {}
-            df = df.dropna(subset=[col_code]).reset_index(drop=True)
-            for idx in range(len(df)):
-                code = str(df[col_code].iloc[idx]).strip()
-                desc = str(df[col_desc].iloc[idx]).strip()
-                if code and desc and code != 'nan':
-                    mapping[code] = desc
-            return mapping
-
-    raise ValueError(
-        "No se encontraron columnas 'Code' y 'Description' en el REPORTE DOC."
-    )
-
-
 def extract_tropas(val):
     if pd.isna(val):
         return set()
@@ -108,7 +57,6 @@ def extract_tropas(val):
 COL_PRODUCTO = 'Producto'     # descripción en castellano (se usa para agrupar y filtrar AA)
 COL_PRODUCT_EN = 'Product'    # descripción en inglés que ya trae el romaneo
 COL_CODIGO = 'Cod Prod'
-COL_OLD_CODE = 'Old Code'
 COL_CAJAS = 'Cartons'
 COL_NETO = 'Net W'
 COL_BRUTO = 'Gross'
@@ -203,13 +151,12 @@ def match_packing_list(packing_lists, codigos, cajas, solo_uno=False):
     return mejor
 
 
-def process_file(filepath, base_path, translation_dict=None, packing_lists=None, solo_uno=False):
+def process_file(filepath, packing_lists=None, solo_uno=False):
     filepath = Path(filepath)
     outpath = OUTPUT_FOLDER / (filepath.stem + '_completada.xlsx')
 
     with pd.ExcelFile(filepath) as xl:
         data_sheet, header_row = find_data_sheet_and_header(filepath, xl)
-        sheet_names = list(xl.sheet_names)
 
     df = pd.read_excel(filepath, sheet_name=data_sheet, header=header_row)
 
@@ -239,27 +186,17 @@ def process_file(filepath, base_path, translation_dict=None, packing_lists=None,
         .rename(columns={COL_PRODUCTO: 'Producto'})
     )
 
-    # Descripción en inglés: 1) REPORTE DOC por Cod Prod / Old Code,
-    # 2) columna 'Product' del romaneo, 3) Producto original.
+    # Descripción en inglés: columna 'Product' del romaneo (si falta, Producto original)
     first = df.groupby(COL_PRODUCTO).first()
 
     def get_description(producto):
-        row = first.loc[producto]
-        if translation_dict:
-            for col in (COL_CODIGO, COL_OLD_CODE):
-                if col in row.index:
-                    code = _clean_code(row[col])
-                    if code and code in translation_dict:
-                        return translation_dict[code], True
-        if COL_PRODUCT_EN in row.index:
-            en = str(row[COL_PRODUCT_EN]).strip()
+        if COL_PRODUCT_EN in first.columns:
+            en = str(first.loc[producto, COL_PRODUCT_EN]).strip()
             if en and en.lower() != 'nan':
-                return en, False
-        return producto, False
+                return en
+        return producto
 
-    descs = grouped['Producto'].apply(get_description)
-    grouped['Descripcion'] = descs.apply(lambda t: t[0])
-    grouped['EnReporte'] = descs.apply(lambda t: t[1])
+    grouped['Descripcion'] = grouped['Producto'].apply(get_description)
 
     all_tropas = set()
     for t in df[COL_TROPA].dropna():
@@ -271,13 +208,7 @@ def process_file(filepath, base_path, translation_dict=None, packing_lists=None,
         all_lotes.add(pd.Timestamp(d).normalize())
     lotes_str = ', '.join(d.strftime('%d/%m/%Y') for d in sorted(all_lotes))
 
-    has_planilla = any('PLANILLA' in s.upper() for s in sheet_names)
-    if has_planilla:
-        shutil.copy(filepath, outpath)
-        base_note = ''
-    else:
-        shutil.copy(base_path, outpath)
-        base_note = ' [usó Planilla_BASE_]'
+    shutil.copy(PLANILLA_BASE, outpath)
 
     wb = load_workbook(outpath)
     ws = wb[next(s for s in wb.sheetnames if 'PLANILLA' in s.upper())]
@@ -311,17 +242,12 @@ def process_file(filepath, base_path, translation_dict=None, packing_lists=None,
 
     wb.save(outpath)
 
-    matched = int(grouped['EnReporte'].sum()) if translation_dict else 0
-
     return {
         'nombre': filepath.name,
         'salida': filepath.stem + '_completada.xlsx',
         'cortes': len(grouped),
         'tropas': len(all_tropas),
         'lotes': len(all_lotes),
-        'base_note': base_note,
-        'traducidos': int(matched),
-        'sin_traduccion': int(len(grouped) - matched) if translation_dict else 0,
         'cajas': total_cajas,
         'consignee': consignee_info,
     }
@@ -335,39 +261,22 @@ def index():
 @app.route('/procesar', methods=['POST'])
 def procesar():
     romaneo_files = request.files.getlist('romaneo_files')
-    base_file = request.files.get('planilla_base')
-    reporte_file = request.files.get('reporte_doc')
 
     if not romaneo_files or all(f.filename == '' for f in romaneo_files):
         return jsonify({'error': 'No seleccionaste archivos ROMANEO'}), 400
+
+    if not PLANILLA_BASE.exists():
+        return jsonify({'error': 'No se encontró Planilla_BASE_.xlsx en el servidor'}), 500
 
     for f in UPLOAD_FOLDER.glob('*'):
         f.unlink()
     for f in OUTPUT_FOLDER.glob('*'):
         f.unlink()
 
-    if base_file and base_file.filename:
-        base_path = UPLOAD_FOLDER / 'Planilla_BASE_.xlsx'
-        base_file.save(base_path)
-    elif PLANILLA_BASE.exists():
-        base_path = PLANILLA_BASE
-    else:
-        return jsonify({'error': 'No se encontró Planilla_BASE_.xlsx'}), 400
-
-    # REPORTE DOC opcional: si no viene, se usa la columna 'Product' del romaneo
-    translation_dict = None
-    if reporte_file and reporte_file.filename:
-        reporte_path = UPLOAD_FOLDER / reporte_file.filename
-        reporte_file.save(reporte_path)
-        try:
-            translation_dict = build_translation_dict(reporte_path)
-        except Exception as e:
-            return jsonify({'error': f'Error leyendo REPORTE DOC: {str(e)}'}), 400
-
     resultados = []
     errores = []
 
-    # PACKING LISTs (PDF): opcionales, de ahí sale el CONSIGNEE de cada carga
+    # PACKING LISTs (PDF): de ahí sale el CONSIGNEE de cada carga
     packing_lists = []
     for f in request.files.getlist('packing_lists'):
         if not f.filename:
@@ -390,8 +299,7 @@ def procesar():
         save_path = UPLOAD_FOLDER / f.filename
         f.save(save_path)
         try:
-            r = process_file(save_path, base_path, translation_dict,
-                             packing_lists=packing_lists, solo_uno=solo_uno)
+            r = process_file(save_path, packing_lists=packing_lists, solo_uno=solo_uno)
             if packing_lists and not r['consignee']:
                 r['consignee_warn'] = 'No se encontró Packing List para este romaneo (consignee sin completar)'
             resultados.append(r)

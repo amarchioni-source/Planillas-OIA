@@ -7,7 +7,7 @@ App web para procesar archivos ROMANEO ("Detalle de cargas remito ...") y genera
 ```
 planillas-app/
 ├── app.py                  # Servidor Flask
-├── Planilla_BASE_.xlsx     # Template base (subir acá)
+├── Planilla_BASE_.xlsx     # Template base (se usa siempre esta)
 ├── requirements.txt
 ├── Procfile
 └── templates/
@@ -30,14 +30,13 @@ planillas-app/
 
 - Subís uno o varios archivos ROMANEO (.xlsx)
 - Subís el Packing List (PDF) de cada romaneo: de ahí sale el CONSIGNEE (celda E25)
-- Opcionalmente subís el REPORTE DOC (si no, la descripción en inglés sale de la columna `Product` del romaneo)
-- Opcionalmente subís la Planilla_BASE_ (si no está en el servidor)
 - Procesás y descargás cada planilla o todas juntas en ZIP
 
 ## Reglas de procesamiento
 
-- Columnas del romaneo usadas: `Producto`, `Product`, `Cod Prod`, `Old Code`, `Cartons`, `Net W`, `Gross`, `Tropa`, `Prod Date`
+- Columnas del romaneo usadas: `Producto`, `Product`, `Cod Prod`, `Cartons`, `Net W`, `Gross`, `Tropa`, `Prod Date`
 - Se agrupa por `Producto`: cajas = suma `Cartons`, neto = suma `Net W`, bruto = suma `Gross`
+- Descripción en inglés (columna E) = columna `Product` del romaneo
 - Lotes (E70) = fechas de `Prod Date`
 - Consignee (E25) = bloque CONSIGNEE del Packing List. Cada romaneo se empareja con su Packing List por códigos de producto (CDxxxxx) y total de cajas; si se sube un solo romaneo y un solo Packing List, se usan juntos directamente
 

@@ -83,19 +83,6 @@
             margin-top: 8px;
         }
 
-        .base-zone {
-            border: 2px dashed #c6f6d5;
-            background: #f0fff4;
-        }
-        .base-zone:hover { border-color: #48bb78; background: #e6ffed; }
-
-        .reporte-zone {
-            border: 2px dashed #fbd38d;
-            background: #fffaf0;
-        }
-        .reporte-zone:hover { border-color: #ed8936; background: #fef3e2; }
-        .reporte-zone .file-count { color: #dd6b20; }
-
         .pl-zone {
             border: 2px dashed #bee3f8;
             background: #ebf8ff;
@@ -179,13 +166,13 @@
             font-size: 0.8rem;
             color: #718096;
         }
-        .resultado-item .traduccion {
+        .resultado-item .extra {
             font-size: 0.78rem;
             color: #718096;
             margin-top: 2px;
         }
-        .traduccion .ok { color: #276749; font-weight: 600; }
-        .traduccion .warn { color: #c05621; font-weight: 600; }
+        .extra .ok { color: #276749; font-weight: 600; }
+        .extra .warn { color: #c05621; font-weight: 600; }
 
         .error-item {
             background: #fff5f5;
@@ -264,28 +251,6 @@
         </div>
     </div>
 
-    <div class="card">
-        <h2>📊 REPORTE DOC <span style="font-weight:400;color:#c05621;font-size:0.85rem">(opcional — si no se sube, se usa la columna Product del romaneo)</span></h2>
-        <div class="upload-zone reporte-zone" id="reporteZone" onclick="document.getElementById('reporteInput').click()">
-            <div class="icon">🌐</div>
-            <div class="label">Subí el REPORTE DOC con los shipments</div>
-            <div class="sublabel">Se usa para traer las descripciones en inglés de cada código</div>
-            <input type="file" id="reporteInput" accept=".xlsx">
-            <div class="file-count" id="reporteCount"></div>
-        </div>
-    </div>
-
-    <div class="card">
-        <h2>📋 Planilla BASE <span style="font-weight:400;color:#a0aec0;font-size:0.85rem">(opcional si ya está en el servidor)</span></h2>
-        <div class="upload-zone base-zone" id="baseZone" onclick="document.getElementById('baseInput').click()">
-            <div class="icon">📄</div>
-            <div class="label">Subí la Planilla_BASE_.xlsx</div>
-            <div class="sublabel">Se usa como plantilla para completar cada romaneo</div>
-            <input type="file" id="baseInput" accept=".xlsx">
-            <div class="file-count" id="baseCount"></div>
-        </div>
-    </div>
-
     <button class="btn btn-primary" id="btnProcesar" onclick="procesar()">
         ⚙️ Procesar archivos
     </button>
@@ -311,18 +276,11 @@
 
 <script>
     const romaneoInput = document.getElementById('romaneoInput');
-    const baseInput = document.getElementById('baseInput');
-    const reporteInput = document.getElementById('reporteInput');
     const romaneoZone = document.getElementById('romaneoZone');
 
     romaneoInput.addEventListener('change', () => {
         const n = romaneoInput.files.length;
         document.getElementById('romaneoCount').textContent = n > 0 ? `${n} archivo${n > 1 ? 's' : ''} seleccionado${n > 1 ? 's' : ''}` : '';
-    });
-
-    baseInput.addEventListener('change', () => {
-        const f = baseInput.files[0];
-        document.getElementById('baseCount').textContent = f ? `✓ ${f.name}` : '';
     });
 
     const plInput = document.getElementById('plInput');
@@ -338,11 +296,6 @@
         plZone.classList.remove('dragover');
         plInput.files = e.dataTransfer.files;
         contarPL(e.dataTransfer.files.length);
-    });
-
-    reporteInput.addEventListener('change', () => {
-        const f = reporteInput.files[0];
-        document.getElementById('reporteCount').textContent = f ? `✓ ${f.name}` : '';
     });
 
     // Drag & drop ROMANEO
@@ -363,14 +316,9 @@
             return;
         }
 
-        const reporte = reporteInput.files[0];
-
         const formData = new FormData();
         for (const f of files) formData.append('romaneo_files', f);
-        if (reporte) formData.append('reporte_doc', reporte);
         for (const f of plInput.files) formData.append('packing_lists', f);
-        const base = baseInput.files[0];
-        if (base) formData.append('planilla_base', base);
 
         document.getElementById('btnProcesar').disabled = true;
         document.getElementById('loading').style.display = 'block';
@@ -406,25 +354,18 @@
 
         let html = '';
         for (const r of resultados) {
-            const tradInfo = (r.traducidos > 0 || r.sin_traduccion > 0)
-                ? `<div class="traduccion">
-                     <span class="ok">✓ ${r.traducidos} con descripción en inglés</span>
-                     ${r.sin_traduccion > 0 ? `· <span class="warn">⚠ ${r.sin_traduccion} sin match en REPORTE DOC (se usó Product del romaneo)</span>` : ''}
-                   </div>`
-                : '';
             let consInfo = '';
             if (r.consignee) {
-                consInfo = `<div class="traduccion"><span class="ok">✓ Consignee: ${r.consignee.nombre} (de ${r.consignee.archivo})</span>
+                consInfo = `<div class="extra"><span class="ok">✓ Consignee: ${r.consignee.nombre} (de ${r.consignee.archivo})</span>
                     ${r.consignee.cajas_ok ? '' : `· <span class="warn">⚠ el Packing List dice ${r.consignee.cajas_pl ?? '?'} cajas y el romaneo ${r.cajas}</span>`}</div>`;
             } else if (r.consignee_warn) {
-                consInfo = `<div class="traduccion"><span class="warn">⚠ ${r.consignee_warn}</span></div>`;
+                consInfo = `<div class="extra"><span class="warn">⚠ ${r.consignee_warn}</span></div>`;
             }
             html += `
                 <div class="resultado-item">
                     <div class="info">
                         <div class="nombre">${r.nombre}<span class="badge badge-ok">OK</span></div>
-                        <div class="detalle">${r.cortes} cortes AA · ${r.tropas} tropas · ${r.lotes} lotes${r.base_note}</div>
-                        ${tradInfo}
+                        <div class="detalle">${r.cortes} cortes AA · ${r.tropas} tropas · ${r.lotes} lotes</div>
                         ${consInfo}
                     </div>
                     <a href="/descargar/${encodeURIComponent(r.salida)}">

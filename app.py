@@ -151,9 +151,27 @@ def match_packing_list(packing_lists, codigos, cajas, solo_uno=False):
     return mejor
 
 
+def _nombre_salida(pl, filepath):
+    """
+    'PLANILLA OIA <N° de venta>.xlsx' con el N° de venta del Packing List
+    (EXPORTER REFERENCE). Sin Packing List se usa el nombre del romaneo.
+    Si el nombre ya existe en esta tanda, se agrega (2), (3)...
+    """
+    if pl and pl.get('venta'):
+        venta = re.sub(r'[\\/:*?"<>|]', '-', pl['venta'])
+        base = 'PLANILLA OIA ' + venta
+    else:
+        base = 'PLANILLA OIA ' + filepath.stem
+    nombre = f'{base}.xlsx'
+    n = 2
+    while (OUTPUT_FOLDER / nombre).exists():
+        nombre = f'{base} ({n}).xlsx'
+        n += 1
+    return nombre
+
+
 def process_file(filepath, packing_lists=None, solo_uno=False):
     filepath = Path(filepath)
-    outpath = OUTPUT_FOLDER / (filepath.stem + '_completada.xlsx')
 
     with pd.ExcelFile(filepath) as xl:
         data_sheet, header_row = find_data_sheet_and_header(filepath, xl)
@@ -208,6 +226,13 @@ def process_file(filepath, packing_lists=None, solo_uno=False):
         all_lotes.add(pd.Timestamp(d).normalize())
     lotes_str = ', '.join(d.strftime('%d/%m/%Y') for d in sorted(all_lotes))
 
+    # Packing list que corresponde a este romaneo (consignee + N° de venta)
+    codigos = {_clean_code(c) for c in df[COL_CODIGO].dropna()} if COL_CODIGO in df.columns else set()
+    total_cajas = int(round(df[COL_CAJAS].sum()))
+    pl = match_packing_list(packing_lists or [], codigos, total_cajas, solo_uno=solo_uno)
+
+    salida = _nombre_salida(pl, filepath)
+    outpath = OUTPUT_FOLDER / salida
     shutil.copy(PLANILLA_BASE, outpath)
 
     wb = load_workbook(outpath)
@@ -225,10 +250,7 @@ def process_file(filepath, packing_lists=None, solo_uno=False):
     ws['E69'] = tropas_str
     ws['E70'] = lotes_str
 
-    # CONSIGNEE (E25) desde el packing list que corresponde a este romaneo
-    codigos = {_clean_code(c) for c in df[COL_CODIGO].dropna()} if COL_CODIGO in df.columns else set()
-    total_cajas = int(round(df[COL_CAJAS].sum()))
-    pl = match_packing_list(packing_lists or [], codigos, total_cajas, solo_uno=solo_uno)
+    # CONSIGNEE (E25) desde el packing list
     consignee_info = None
     if pl and pl['consignee']:
         ws['E25'] = pl['consignee']
@@ -244,7 +266,7 @@ def process_file(filepath, packing_lists=None, solo_uno=False):
 
     return {
         'nombre': filepath.name,
-        'salida': filepath.stem + '_completada.xlsx',
+        'salida': salida,
         'cortes': len(grouped),
         'tropas': len(all_tropas),
         'lotes': len(all_lotes),
@@ -319,7 +341,7 @@ def descargar(filename):
 
 @app.route('/descargar_todo')
 def descargar_todo():
-    archivos = list(OUTPUT_FOLDER.glob('*_completada.xlsx'))
+    archivos = list(OUTPUT_FOLDER.glob('PLANILLA OIA *.xlsx'))
     if not archivos:
         return 'No hay archivos para descargar', 404
     zip_path = OUTPUT_FOLDER / 'planillas_completadas.zip'

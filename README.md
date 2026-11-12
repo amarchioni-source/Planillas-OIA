@@ -29,7 +29,7 @@ planillas-app/
 ## Uso
 
 - Subís uno o varios archivos ROMANEO (.xlsx)
-- Subís el Packing List (PDF) de cada romaneo: de ahí sale el CONSIGNEE (celda E25)
+- Subís el Packing List (PDF) de cada romaneo (obligatorio): de ahí salen el N° de venta y el CONSIGNEE (celda E25)
 - Procesás y descargás cada planilla o todas juntas en ZIP
 
 ## Reglas de procesamiento
@@ -40,7 +40,7 @@ planillas-app/
 - Lotes (E70) = fechas de `Prod Date`
 - Consignee (E25) = bloque CONSIGNEE del Packing List. Cada romaneo se empareja con su Packing List por códigos de producto (CDxxxxx) y total de cajas; si se sube un solo romaneo y un solo Packing List, se usan juntos directamente
 
-- Nombre del archivo: `PLANILLA OIA <N° de venta>.xlsx`, con el N° de venta del Packing List (EXPORTER REFERENCE). Sin Packing List: `PLANILLA OIA <nombre del romaneo>.xlsx`
+- Nombre del archivo: siempre `PLANILLA OIA <N° de venta>.xlsx`, con el N° de venta del Packing List (EXPORTER REFERENCE)
 - Solo incluye cortes cuyo Producto contenga **AA** (Angus)
 - Cortes se escriben en filas **34 a 63** (máx 30 cortes)
 - Tropas en **E69**, lotes en **E70**

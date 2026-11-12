@@ -241,7 +241,7 @@
     </div>
 
     <div class="card">
-        <h2>🚚 PACKING LIST <span style="font-weight:400;color:#2b6cb0;font-size:0.85rem">(PDF — completa el CONSIGNEE de cada carga)</span></h2>
+        <h2>🚚 PACKING LIST <span style="font-weight:400;color:#2b6cb0;font-size:0.85rem">(PDF, obligatorio — N° de venta y CONSIGNEE de cada carga)</span></h2>
         <div class="upload-zone pl-zone" id="plZone" onclick="document.getElementById('plInput').click()">
             <div class="icon">📦</div>
             <div class="label">Subí el Packing List de cada romaneo</div>
@@ -313,6 +313,10 @@
         const files = romaneoInput.files;
         if (!files.length) {
             alert('Seleccioná al menos un archivo ROMANEO');
+            return;
+        }
+        if (!plInput.files.length) {
+            alert('Subí el Packing List de cada romaneo (de ahí salen el N° de venta y el consignee)');
             return;
         }
 

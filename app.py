@@ -151,17 +151,12 @@ def match_packing_list(packing_lists, codigos, cajas, solo_uno=False):
     return mejor
 
 
-def _nombre_salida(pl, filepath):
+def _nombre_salida(venta):
     """
     'PLANILLA OIA <N° de venta>.xlsx' con el N° de venta del Packing List
-    (EXPORTER REFERENCE). Sin Packing List se usa el nombre del romaneo.
-    Si el nombre ya existe en esta tanda, se agrega (2), (3)...
+    (EXPORTER REFERENCE). Si el nombre ya existe en esta tanda, se agrega (2), (3)...
     """
-    if pl and pl.get('venta'):
-        venta = re.sub(r'[\\/:*?"<>|]', '-', pl['venta'])
-        base = 'PLANILLA OIA ' + venta
-    else:
-        base = 'PLANILLA OIA ' + filepath.stem
+    base = 'PLANILLA OIA ' + re.sub(r'[\\/:*?"<>|]', '-', venta)
     nombre = f'{base}.xlsx'
     n = 2
     while (OUTPUT_FOLDER / nombre).exists():
@@ -230,8 +225,13 @@ def process_file(filepath, packing_lists=None, solo_uno=False):
     codigos = {_clean_code(c) for c in df[COL_CODIGO].dropna()} if COL_CODIGO in df.columns else set()
     total_cajas = int(round(df[COL_CAJAS].sum()))
     pl = match_packing_list(packing_lists or [], codigos, total_cajas, solo_uno=solo_uno)
+    if not pl:
+        raise ValueError('No se encontró el Packing List de este romaneo. '
+                         'Subí su Packing List (de ahí salen el N° de venta y el consignee).')
+    if not pl.get('venta'):
+        raise ValueError(f"El Packing List {pl['archivo']} no tiene EXPORTER REFERENCE (N° de venta).")
 
-    salida = _nombre_salida(pl, filepath)
+    salida = _nombre_salida(pl['venta'])
     outpath = OUTPUT_FOLDER / salida
     shutil.copy(PLANILLA_BASE, outpath)
 
@@ -251,16 +251,14 @@ def process_file(filepath, packing_lists=None, solo_uno=False):
     ws['E70'] = lotes_str
 
     # CONSIGNEE (E25) desde el packing list
-    consignee_info = None
-    if pl and pl['consignee']:
-        ws['E25'] = pl['consignee']
-        ws['E25'].alignment = ws['E25'].alignment.copy(wrap_text=True, vertical='top')
-        consignee_info = {
-            'archivo': pl['archivo'],
-            'nombre': pl['consignee'].splitlines()[0],
-            'cajas_ok': pl['cajas'] == total_cajas,
-            'cajas_pl': pl['cajas'],
-        }
+    ws['E25'] = pl['consignee']
+    ws['E25'].alignment = ws['E25'].alignment.copy(wrap_text=True, vertical='top')
+    consignee_info = {
+        'archivo': pl['archivo'],
+        'nombre': pl['consignee'].splitlines()[0],
+        'cajas_ok': pl['cajas'] == total_cajas,
+        'cajas_pl': pl['cajas'],
+    }
 
     wb.save(outpath)
 
@@ -286,6 +284,9 @@ def procesar():
 
     if not romaneo_files or all(f.filename == '' for f in romaneo_files):
         return jsonify({'error': 'No seleccionaste archivos ROMANEO'}), 400
+
+    if not any(f.filename for f in request.files.getlist('packing_lists')):
+        return jsonify({'error': 'Subí el Packing List de cada romaneo (de ahí salen el N° de venta y el consignee)'}), 400
 
     if not PLANILLA_BASE.exists():
         return jsonify({'error': 'No se encontró Planilla_BASE_.xlsx en el servidor'}), 500
@@ -322,8 +323,6 @@ def procesar():
         f.save(save_path)
         try:
             r = process_file(save_path, packing_lists=packing_lists, solo_uno=solo_uno)
-            if packing_lists and not r['consignee']:
-                r['consignee_warn'] = 'No se encontró Packing List para este romaneo (consignee sin completar)'
             resultados.append(r)
         except Exception as e:
             errores.append({'nombre': f.filename, 'error': str(e)})
